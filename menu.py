@@ -13,8 +13,12 @@ class Menu:
     def __del__(self):
         pass
 
-    def playTheGame(self):
-        self.state = "playTheGame"
+    def playAsPlayer(self):
+        self.state = "playAsPlayer"
+        self.on_closing()
+
+    def playAsAI(self):
+        self.state = "playAsAI"
         self.on_closing()
 
     def trainTheAI(self):
@@ -24,7 +28,7 @@ class Menu:
     def setup_menu(self):
         self.window.focus_force()
         frame = Frame(self.window)
-        window_width, window_height = (400, 200)
+        window_width, window_height = (400, 300)
         ''' window_width, window_height --> Width and height of window. '''
         screen_width, screen_height = (self.window.winfo_screenwidth(), self.window.winfo_screenheight())
         ''' screen_width, screen_height --> Width and height of screen. '''
@@ -38,10 +42,12 @@ class Menu:
         frame.master.title("Snake Game - Menu")
         frame.pack(fill=BOTH, expand=1)
 
-        B1 = Button(frame, text="Play The Game", command=self.playTheGame)
+        B1 = Button(frame, text="Play As Player", command=self.playAsPlayer)
         B1.pack(fill=BOTH, expand=True)
-        B2 = Button(frame, text="Train The AI", command=self.trainTheAI)
+        B2 = Button(frame, text="Play As AI", command=self.playAsAI)
         B2.pack(fill=BOTH, expand=True)
+        B3 = Button(frame, text="Train The AI", command=self.trainTheAI)
+        B3.pack(fill=BOTH, expand=True)
 
     def main(self):
         self.setup_menu()
