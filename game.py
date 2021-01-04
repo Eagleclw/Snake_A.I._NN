@@ -15,26 +15,31 @@ class Game:
 
         self.window = Tk()
         self.frame = Frame(self.window)
-        self.canvas = Canvas(self.frame)
-        self.tickID = None
+        self.canvas = Canvas(self.frame, highlightthickness=0)
+        self.tickID = 'after#0'
 
-        self.play_speed = 10
-        self.train_speed = 1000
+        self.play_as_player_speed = 10
+        self.play_as_ai_speed = 50
+        self.train_the_ai_speed = 1000
         self.walls_blocked = True
         if run_type == "playAsPlayer":
             self.auto_start = False
         else:
             self.auto_start = True
 
-        self.X, self.Y = (10, 10)
-        self.BLOCK_SIZE = 50
-        self.BACKGROUND_COLOR = '#303030'
-        self.SNAKE_COLOR = '#0f0'
-        self.SNAKE_HEAD_COLOR = '#003300'
-        self.FOOD_COLOR = '#f00'
-        self.INITIAL_SPEED = self.play_speed
-        if run_type == "trainTheAI":
-            self.INITIAL_SPEED = self.train_speed
+        self.initial_snake_length = 3
+        self.X = self.Y = 10
+        self.BLOCK_SIZE = round(500 / self.X)
+        self.BACKGROUND_COLOR = '#051932'
+        self.SNAKE_COLOR = '#19C832'
+        self.SNAKE_HEAD_COLOR = '#FA1919'
+        self.FOOD_COLOR = '#FA6419'
+        self.SCORE_BACKGROUND_COLOR = '#05324B'
+        self.INITIAL_SPEED = self.play_as_player_speed
+        if run_type == "playAsAI":
+            self.INITIAL_SPEED = self.play_as_ai_speed
+        elif run_type == "trainTheAI":
+            self.INITIAL_SPEED = self.train_the_ai_speed
         self.PAUSED = 0
 
         self.DIRECTION_NONE = 'None'
@@ -76,7 +81,9 @@ class Game:
         print("---------------")
 
         self.game = self.create_game()
+        self.SCORE_INFO = None
         self.running_time = 0
+        self.model_load_failed = False
         self.snake_ai = None
         self.ai_input_shape = (32, 1)
         self.invalid_distance = ((self.X * self.X) + (self.Y * self.Y)) ** 0.5
@@ -116,40 +123,58 @@ class Game:
         return "{:03d} Days {:02d} Hours {:02d} Minutes {:02d} Seconds".format(days, hours, minutes, seconds)
 
     def setup_game(self):
+        header_height = 16
         self.window.focus_force()
         window_width, window_height = (self.X * self.BLOCK_SIZE, self.Y * self.BLOCK_SIZE)
-        ''' window_width, window_height --> Width and height of window. '''
+        window_width += 1
+        window_height += 33
         screen_width, screen_height = (self.window.winfo_screenwidth(), self.window.winfo_screenheight())
-        ''' screen_width, screen_height --> Width and height of screen. '''
-        x_coordinate, y_coordinate = (int((screen_width / 2) - (window_width / 2)),
-                                      int((screen_height / 2) - (window_height / 2)))
-        ''' x_coordinate, y_coordinate --> The starting points of window. '''
+        x_coordinate, y_coordinate = (int((screen_width / 2) - (window_width / 2)), int((screen_height / 2) - (window_height / 2)))
 
         self.window.geometry("{}x{}+{}+{}".format(window_width, window_height, x_coordinate, y_coordinate))
         self.window.resizable(False, False)
+        self.frame.master.title("Snake Game")
 
-        self.frame.master.title("Snake Game   |   SCORE : 0   |   Best Score : 0    |   Best AI Score : 0 ")
+        self.SCORE_INFO = Label(self.frame, height = 1, font=("Calibri",header_height), bg = self.SCORE_BACKGROUND_COLOR, fg = "#FFFFFF",
+                                text="SCORE : 0" + "   |   Best Score : " + str(self.game_data['best_score'])
+                                     + "   |   Best AI Score : " + str(self.game_data['ai_best_score']))
+
+        self.SCORE_INFO.pack(fill=BOTH, expand=False)
         self.frame.pack(fill=BOTH, expand=1)
         self.canvas.pack(fill=BOTH, expand=1)
 
     def create_game(self):
-        snake_randX = randint(0, self.X - 1)
-        snake_randY = randint(0, self.Y - 1)
-
-        direction_selector = 0
-        if self.auto_start:
-            direction_selector = randint(1, len(self.VALID_DIRECTIONS) - 1)
+        direction_selector = list(self.VALID_DIRECTIONS.keys())[0]
+        snake_body = deque()
+        snake_body.append((randint(1, self.X - 2), randint(1, self.Y - 2)))
+        for i in range (1,self.initial_snake_length + 1):
+            while True:
+                direction = list(self.VALID_DIRECTIONS.keys())[randint(1, len(self.VALID_DIRECTIONS) - 1)]
+                u, w = snake_body[-i]
+                x, y = self.MOVEMENTS[direction](u, w)
+                if 0 <= x < self.X and 0 <= y < self.Y and (x,y) not in snake_body:
+                    snake_body.appendleft((x, y))
+                    if self.auto_start and i == 1:
+                        if direction == 'Left':
+                            direction_selector = 'Right'
+                        elif direction == 'Right':
+                            direction_selector = 'Left'
+                        elif direction == 'Up':
+                            direction_selector = 'Down'
+                        elif direction == 'Down':
+                            direction_selector = 'Up'
+                    break
 
         food_randX = randint(0, self.X - 1)
         food_randY = randint(0, self.Y - 1)
-        while (food_randX, food_randY) == (snake_randX, snake_randY):
+        while (food_randX, food_randY) in snake_body:
             food_randX = randint(0, self.X - 1)
             food_randY = randint(0, self.Y - 1)
 
         return {
-            'snake': deque(((snake_randX, snake_randY), (snake_randX, snake_randY))),
+            'snake': snake_body,
             'food': (food_randX, food_randY),
-            'direction': list(self.VALID_DIRECTIONS.keys())[direction_selector],
+            'direction': direction_selector,
             'moves': deque(),
             'points': 0,
             'speed': self.INITIAL_SPEED
@@ -182,6 +207,9 @@ class Game:
             self.episode_reward = 0
             self.current_loop_limit = self.initial_loop_limit
 
+        self.SCORE_INFO.config(text="SCORE : 0" + "   |   Best Score : " + str(self.game_data['best_score'])
+                                    + "   |   Best AI Score : " + str(self.game_data['ai_best_score']))
+
         current_speed = self.game['speed']
         self.game = self.create_game()
         self.game['speed'] = current_speed
@@ -196,14 +224,12 @@ class Game:
         except e:
             pass
 
-    def draw_rect(self, x, y, color=None):
-        if color is None:
-            color = self.SNAKE_COLOR
+    def draw_rect(self, x, y, color):
         x1 = x * self.BLOCK_SIZE
         y1 = y * self.BLOCK_SIZE
         x2 = x1 + self.BLOCK_SIZE
         y2 = y1 + self.BLOCK_SIZE
-        return self.canvas.create_rectangle(x1, y1, x2, y2, outline='', fill=color)
+        return self.canvas.create_rectangle(x1, y1, x2, y2, outline='#000000', fill=color)
 
     def render(self):
         self.canvas.delete('all')
@@ -213,7 +239,7 @@ class Game:
             if i == (len(self.game['snake']) - 1):
                 self.draw_rect(self.game['snake'][i][0], self.game['snake'][i][1], self.SNAKE_HEAD_COLOR)
             else:
-                self.draw_rect(self.game['snake'][i][0], self.game['snake'][i][1])
+                self.draw_rect(self.game['snake'][i][0], self.game['snake'][i][1], self.SNAKE_COLOR)
 
         x, y = self.game['food']
         self.draw_rect(x, y, color=self.FOOD_COLOR)
@@ -240,61 +266,62 @@ class Game:
             self.current_loop_limit = self.initial_loop_limit
 
     def move_snake(self, direction):
-        snake = set(self.game['snake'])
-        u, w = self.game['snake'][-1]
-        next_point = self.MOVEMENTS[direction](u, w)
+        if direction != 'None':
+            snake = set(self.game['snake'])
+            u, w = self.game['snake'][-1]
+            next_point = self.MOVEMENTS[direction](u, w)
 
-        x, y = next_point
+            x, y = next_point
 
-        if self.walls_blocked and (x<0 or x >= self.X or y < 0 or y >= self.Y):
-            if self.run_type == "trainTheAI":
-                self.reward = -1
-                self.done = True
-            self.reset()
-        else:
-            if x < 0:
-                x = x + self.X
-            if x >= self.X:
-                x = x - self.X
-            if y < 0:
-                y = y + self.Y
-            if y >= self.Y:
-                y = y - self.Y
-
-            next_point = x, y
-
-            if next_point == self.game['food'] or self.game['snake'][-1] == self.game['food']:
-                self.eat(snake)
-            else:
-                self.game['snake'].popleft()
+            if self.walls_blocked and (x<0 or x >= self.X or y < 0 or y >= self.Y):
                 if self.run_type == "trainTheAI":
-                    self.reward = - 0.1
-                    self.current_loop_limit -= 1
+                    self.reward = -1
+                    self.done = True
+                self.reset()
+            else:
+                if x < 0:
+                    x = x + self.X
+                if x >= self.X:
+                    x = x - self.X
+                if y < 0:
+                    y = y + self.Y
+                if y >= self.Y:
+                    y = y - self.Y
 
-            self.frame.master.title("Snake Game   |   SCORE : " + str(self.game['points']) +
-                                    "   |   Best Score : " + str(self.game_data['best_score']) +
-                                    "   |   Best AI Score : " + str(self.game_data['ai_best_score']))
+                next_point = x, y
 
-            in_snake = 0
-
-            if len(self.game['snake']) > 1:
-                for i in range(1, len(self.game['snake'])):
-                    if next_point == self.game['snake'][i]:
-                        in_snake = 1
-
-                if in_snake == 1:
+                if next_point == self.game['food'] or self.game['snake'][-1] == self.game['food']:
+                    self.eat(snake)
+                else:
+                    self.game['snake'].popleft()
                     if self.run_type == "trainTheAI":
-                        self.reward = -1
-                        self.done = True
-                    self.reset()
+                        self.reward = - 0.01
+                        self.current_loop_limit -= 1
+
+                self.SCORE_INFO.config(text="SCORE : " + str(self.game['points']) +
+                                            "   |   Best Score : " + str(self.game_data['best_score']) +
+                                            "   |   Best AI Score : " + str(self.game_data['ai_best_score']))
+
+                in_snake = 0
+
+                if len(self.game['snake']) > 1:
+                    for i in range(1, len(self.game['snake'])):
+                        if next_point == self.game['snake'][i]:
+                            in_snake = 1
+
+                    if in_snake == 1:
+                        if self.run_type == "trainTheAI":
+                            self.reward = -1
+                            self.done = True
+                        self.reset()
+                    else:
+                        self.game['snake'].append(next_point)
                 else:
                     self.game['snake'].append(next_point)
-            else:
-                self.game['snake'].append(next_point)
 
-            if self.run_type == "trainTheAI" and self.current_loop_limit == 0:
-                self.done = True
-                self.reset()
+                if self.run_type == "trainTheAI" and self.current_loop_limit == 0:
+                    self.done = True
+                    self.reset()
 
     def handle_next_movement(self):
         direction = self.game['moves'].popleft() if self.game['moves'] else self.game['direction']
@@ -303,23 +330,27 @@ class Game:
 
     def on_press(self, event):
         key = event.keysym
-        if self.PAUSED == 0 and self.run_type == "playAsPlayer":
-            prev_direction = self.game['moves'][-1] if self.game['moves'] else self.game['direction']
-            if key in self.VALID_DIRECTIONS[prev_direction]:
-                self.game['moves'].append(key)
-        if key.lower() == self.KEY_QUIT:
+        if key == self.KEY_LEFT or key == self.KEY_RIGHT or key == self.KEY_UP or key == self.KEY_DOWN:
+            if self.PAUSED == 0 and self.run_type == "playAsPlayer":
+                prev_direction = self.game['moves'][-1] if self.game['moves'] else self.game['direction']
+                if prev_direction == 'None':
+                    u, w = self.game['snake'][-1]
+                    next_point = self.MOVEMENTS[key](u, w)
+                    if next_point not in self.game['snake'] or next_point == self.game['snake'][0]:
+                        self.game['moves'].append(key)
+                elif key in self.VALID_DIRECTIONS[prev_direction]:
+                    self.game['moves'].append(key)
+        elif key.lower() == self.KEY_QUIT:
             self.on_closing()
         elif key.lower() == self.KEY_PAUSE:
             if self.PAUSED == 0:
                 self.PAUSED = 1
-                self.frame.master.title("Snake Game   |   PAUSED.")
+                self.frame.master.title("Snake Game   |   PAUSED")
                 if self.run_type == "trainTheAI":
                     self.running_time += round(time() - self.start_time)
             else:
                 self.PAUSED = 0
-                self.frame.master.title("Snake Game   |   SCORE : " + str(self.game['points']) +
-                                        "   |   Best Score : " + str(self.game_data['best_score']) +
-                                        "   |   Best AI Score : " + str(self.game_data['ai_best_score']))
+                self.frame.master.title("Snake Game")
 
                 if self.run_type == "trainTheAI":
                     self.start_time = time()
@@ -615,8 +646,14 @@ class Game:
         self.state = self.get_state()
         self.action = self.snake_ai.act(self.state)
         key = self.get_key(self.action)
+
         prev_direction = self.game['moves'][-1] if self.game['moves'] else self.game['direction']
-        if key in self.VALID_DIRECTIONS[prev_direction]:
+        if prev_direction == 'None':
+            u, w = self.game['snake'][-1]
+            next_point = self.MOVEMENTS[key](u, w)
+            if next_point not in self.game['snake']:
+                self.game['moves'].append(key)
+        elif key in self.VALID_DIRECTIONS[prev_direction]:
             self.game['moves'].append(key)
 
         self.handle_next_movement()
@@ -631,10 +668,17 @@ class Game:
         self.setup_game()
         if self.run_type == "trainTheAI":
             self.snake_ai = AI(self.ai_input_shape, self.game_data['generation'], self.game_data['epsilon'])
+            if self.snake_ai.model_load_failed:
+                self.model_load_failed = True
+                self.on_closing()
         elif self.run_type == "playAsAI":
             self.snake_ai = AI(self.ai_input_shape, self.game_data['generation'], 0)
+            if self.snake_ai.model_load_failed:
+                self.model_load_failed = True
+                self.on_closing()
 
-        self.tick()
-        self.window.bind('<Key>', self.on_press)
-        self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.window.mainloop()
+        if not self.model_load_failed:
+            self.tick()
+            self.window.bind('<Key>', self.on_press)
+            self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
+            self.window.mainloop()

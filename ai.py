@@ -9,24 +9,24 @@ import time
 from collections import deque
 from keras.models import Sequential, load_model, model_from_json
 from keras.layers import Dense, Flatten, BatchNormalization
-from keras.callbacks import ModelCheckpoint
 from keras.optimizers import Adam, RMSprop
 
 class AI:
     def __init__(self, state_size, gen_count, epsilon):
         print("AI Created.")
         print("-----")
+        self.model_load_failed = False
         self.state_size = state_size
         self.availableActions = ['Left', 'None', 'Right']
         self.action_size = len(self.availableActions)
 
         self.gen_count = gen_count
         self.child_count = 0
-        self.child_limit = 500
+        self.child_limit = 100
         self.child_rewards = 0
         self.child_current_score = 0
         self.child_best_score = 0
-        self.action_limit = 5_000_000
+        self.action_limit = 1_000_000
 
         self.states = []
         self.train_targets = []
@@ -38,12 +38,13 @@ class AI:
         self.epsilon_decay = 0.999
         self.epsilon_min = 0.01
 
-        self.model_checkpoint_callback = ModelCheckpoint(filepath="checkpoint/", save_weights_only=True, monitor='accuracy', mode='max')
         self.model = self.build_model()
-        try:
-            self.model.load_weights("checkpoint/").expect_partial().assert_consumed()
-        except:
-            pass
+        if os.path.isfile("checkpoint.h5"):
+            try:
+                self.model.load_weights("checkpoint.h5")
+            except:
+                print("Failed to load weights. Exiting...")
+                self.model_load_failed = True
 
     def on_closing(self):
         del self
@@ -60,7 +61,7 @@ class AI:
         model.add(Dense(20, activation="relu"))
         model.add(Dense(12, activation="relu"))
         model.add(Dense(self.action_size, activation="softmax"))
-        model.compile(loss="mse", optimizer=Adam(lr=self.learning_rate), metrics=['accuracy'])
+        model.compile(loss="mse", optimizer=Adam(lr=self.learning_rate))
         return model
 
     def remember(self, state, action, reward, next_state, done):
@@ -111,7 +112,8 @@ class AI:
         print(generation_info)
         print("--------------------------------------------------")
         print("Training with collected actions...\n")
-        self.model.fit(np.array(self.states), np.array(self.train_targets), verbose=1, epochs=10, shuffle=True, callbacks=[self.model_checkpoint_callback])
+        self.model.fit(np.array(self.states), np.array(self.train_targets), verbose=1, epochs=1, shuffle=True)
+        self.model.save_weights(filepath="checkpoint.h5")
         print("\nTraining completed...")
         print("--------------------------------------------------")
         self.states.clear()
